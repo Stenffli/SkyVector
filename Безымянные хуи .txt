@@ -1,0 +1,1246 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Flight Tracker - Все аэропорты мира</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin:0; padding:0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        #map { position:absolute; top:0; bottom:0; left:0; right:0; background:#1a1a1a; }
+        
+        .leaflet-control-attribution { display: none !important; }
+        .leaflet-control-container .leaflet-bottom { display: none !important; }
+        
+        .control-panel {
+            position: absolute; top:10px; right:10px;
+            z-index:1000; background:rgba(255,255,255,0.9); padding:6px;
+            border-radius:25px; box-shadow:0 2px 10px rgba(0,0,0,0.3);
+            display:flex; gap:4px; align-items:center;
+            flex-wrap: wrap;
+            max-width: 460px;
+            justify-content: flex-end;
+        }
+        .btn { 
+            width:38px; height:38px; border:none; border-radius:50%; cursor:pointer;
+            font-size:16px; transition:0.2s; display:flex;
+            align-items:center; justify-content:center;
+            color: white;
+            position:relative;
+        }
+        .btn:active { transform:scale(0.9); }
+        .btn-load { background:#4CAF50; }
+        .btn-route { background:#9C27B0; }
+        .btn-fir { background:#795548; }
+        .btn-airports { background:#FF5722; }
+        .btn-clear { background:#f44336; }
+        .btn-live { background:#2196F3; }
+        .btn-info { background:#ff9800; }
+        .btn-map { background:#607D8B; }
+        .btn-msfs { background:#9C27B0; }
+        .btn-search { background:#00BCD4; }
+        .btn-live.active { background:#0b5ed7; box-shadow: 0 0 0 3px rgba(13,110,253,0.5); }
+        .btn-airports.active { background:#FF6B35; box-shadow: 0 0 0 3px rgba(255,107,53,0.5); }
+        .btn-airports.loading { background:#FFA726; animation: pulse-btn 1s infinite; }
+        @keyframes pulse-btn {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        #file-input { display:none; }
+        
+        .btn:hover::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            top: 45px;
+            right: 0;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            white-space: nowrap;
+            z-index: 2000;
+        }
+        
+        .legend {
+            position:absolute; bottom:20px; left:10px; background:rgba(255,255,255,0.9); 
+            padding:8px 12px; border-radius:15px; box-shadow:0 0 10px rgba(0,0,0,0.2); 
+            z-index:1000; font-size:10px;
+            max-width: 220px;
+        }
+        .legend-item { display:flex; align-items:center; gap:6px; margin:2px 0; }
+        .legend-color { width:12px; height:12px; border-radius:3px; display:inline-block; flex-shrink:0; }
+        .legend-color.circle { border-radius:50%; }
+        
+        .modal {
+            display:none; position:fixed; z-index:2000; left:0; top:0; width:100%; height:100%;
+            background:rgba(0,0,0,0.4); justify-content:center; align-items:center;
+        }
+        .modal-content {
+            background:white; padding:20px; border-radius:12px; width:360px;
+            box-shadow:0 4px 12px rgba(0,0,0,0.3); font-size:14px;
+            max-height:80vh; overflow-y:auto;
+        }
+        .modal-content input, .modal-content select, .modal-content textarea {
+            width:100%; padding:8px; margin:5px 0 12px 0; box-sizing:border-box;
+            border:1px solid #ddd; border-radius:6px;
+        }
+        .modal-content button {
+            padding:8px 15px; margin:5px; cursor:pointer; border:none; border-radius:6px;
+            font-weight:bold; font-size:14px;
+        }
+        #apply-zone, #apply-line, #apply-route, #apply-fir { background:#4CAF50; color:white; }
+        #cancel-zone, #cancel-line, #cancel-route, #cancel-fir { background:#f44336; color:white; }
+        
+        .airport-popup { font-size:12px; min-width:200px; max-width:300px; }
+        .airport-popup .name { font-weight:bold; font-size:14px; color:#2196F3; }
+        .airport-popup .code { color:#666; font-size:11px; }
+        .airport-popup .info { margin:3px 0; color:#333; }
+        .airport-popup .type-badge {
+            display:inline-block; padding:2px 8px; border-radius:12px;
+            font-size:10px; font-weight:bold; color:white;
+        }
+        
+        .search-box {
+            position: absolute; top:70px; left:50%; transform:translateX(-50%);
+            z-index:1000; background:white; padding:8px 15px; border-radius:25px;
+            box-shadow:0 2px 10px rgba(0,0,0,0.3); display:none; width:300px;
+        }
+        .search-box input { border:none; outline:none; width:100%; padding:5px; font-size:14px; }
+        .search-box.active { display:flex; }
+        .search-results {
+            position: absolute; top:50px; left:0; right:0;
+            background:white; border-radius:12px; box-shadow:0 4px 12px rgba(0,0,0,0.2);
+            max-height:300px; overflow-y:auto; display:none;
+        }
+        .search-results.active { display:block; }
+        .search-result-item {
+            padding:8px 15px; cursor:pointer; border-bottom:1px solid #eee;
+            display:flex; justify-content:space-between; align-items:center;
+        }
+        .search-result-item:hover { background:#f5f5f5; }
+        .search-result-item .code { font-weight:bold; color:#2196F3; }
+        .search-result-item .name { color:#333; font-size:13px; }
+        .search-result-item .country { color:#999; font-size:11px; }
+        
+        .loading-overlay {
+            position: absolute; top:0; left:0; right:0; bottom:0;
+            background:rgba(0,0,0,0.7); z-index:2000;
+            display:none; justify-content:center; align-items:center;
+            flex-direction:column;
+        }
+        .loading-overlay.active { display:flex; }
+        .loading-overlay .spinner {
+            width:50px; height:50px; border:5px solid #f3f3f3;
+            border-top:5px solid #3498db; border-radius:50%;
+            animation:spin 1s linear infinite;
+        }
+        .loading-overlay .text {
+            color:white; margin-top:20px; font-size:18px;
+        }
+        .loading-overlay .progress {
+            color:#aaa; margin-top:10px; font-size:14px;
+        }
+        @keyframes spin { 0%{transform:rotate(0deg);}100%{transform:rotate(360deg);} }
+        
+        .fir-label { font-size:12px; font-weight:bold; text-shadow:1px 1px 3px rgba(0,0,0,0.8), -1px -1px 3px rgba(0,0,0,0.8); pointer-events:none; }
+        
+        .airport-marker {
+            transition: transform 0.2s;
+            cursor: pointer;
+        }
+        .airport-marker:hover { transform: scale(1.4); z-index:9999; }
+        
+        .stats {
+            position:absolute; bottom:20px; left:50%; transform:translateX(-50%);
+            background:rgba(0,0,0,0.8); color:white; padding:4px 15px;
+            border-radius:20px; font-size:11px; z-index:1000;
+            display:none; text-align:center;
+        }
+        .stats.active { display:block; }
+        
+        @media (max-width: 600px) {
+            .control-panel { max-width:300px; padding:4px; gap:3px; top:5px; right:5px; }
+            .btn { width:32px; height:32px; font-size:14px; }
+            .search-box { width:200px; top:60px; }
+            .legend { font-size:8px; padding:4px 8px; max-width:150px; }
+            .modal-content { width:300px; padding:15px; }
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    
+    <div class="loading-overlay" id="loading-overlay">
+        <div class="spinner"></div>
+        <div class="text" id="loading-text">Загрузка аэропортов...</div>
+        <div class="progress" id="loading-progress">Подготовка данных...</div>
+    </div>
+
+    <div class="search-box" id="search-box">
+        <input type="text" id="search-input" placeholder="?? Поиск аэропорта (ICAO, IATA, название, город)...">
+        <div class="search-results" id="search-results"></div>
+    </div>
+
+    <div class="control-panel">
+        <button class="btn btn-search" id="btn-search" data-tooltip="Поиск аэропорта">🔍</button>
+        <button class="btn btn-airports" id="btn-airports" data-tooltip="Показать/скрыть аэропорты (все 50,000+)">🌍</button>
+        <button class="btn btn-load" id="btn-load" data-tooltip="Загрузить CSV">📂</button>
+        <button class="btn btn-route" id="btn-route" data-tooltip="Маршрут по точкам">✈️</button>
+        <button class="btn btn-fir" id="btn-fir" data-tooltip="Полётные зоны FIR/UIR">🗺️</button>
+        <button class="btn btn-live" id="btn-live" data-tooltip="Live-режим (OpenSky)">🛩️</button>
+        <button class="btn btn-msfs" id="btn-msfs" data-tooltip="MSFS2020">🎮</button>
+        <button class="btn btn-map" id="btn-map" data-tooltip="Сменить карту">🌍</button>
+        <button class="btn btn-clear" id="btn-clear" data-tooltip="Очистить">🗑️</button>
+        <button class="btn btn-info" id="btn-about" data-tooltip="О программе">❓</button>
+        <input type="file" id="file-input" accept=".csv">
+    </div>
+
+    <div class="legend">
+        <div class="legend-item"><span class="legend-color" style="background:#FF6B35; border-radius:50%; width:10px; height:10px;"></span> Крупные</div>
+        <div class="legend-item"><span class="legend-color" style="background:#FFA726; border-radius:50%; width:7px; height:7px;"></span> Средние</div>
+        <div class="legend-item"><span class="legend-color" style="background:#81C784; border-radius:50%; width:5px; height:5px;"></span> Малые</div>
+        <div class="legend-item"><span class="legend-color" style="background:#90A4AE; border-radius:50%; width:3px; height:3px;"></span> Прочие</div>
+        <div class="legend-item"><span class="legend-color" style="background:red;"></span> FIR/UIR зоны</div>
+        <div class="legend-item"><span class="legend-color" style="background:red; height:2px;"></span> Маршрут</div>
+    </div>
+
+    <div class="stats" id="stats">Загружено: 0 аэропортов</div>
+
+    <!-- FIR Modal -->
+    <div class="modal" id="fir-modal">
+        <div class="modal-content">
+            <b>🗺️ Полётные зоны (FIR/UIR)</b><br><br>
+            <label>Выберите зону:</label>
+            <select id="fir-select">
+                <option value="">— Выберите зону —</option>
+                <optgroup label="🌍 Атлантический океан">
+                    <option value="Shanwick">Shanwick Oceanic (EGGX)</option>
+                    <option value="Gander">Gander Oceanic (CZQX)</option>
+                    <option value="Santa Maria">Santa Maria Oceanic (LPPO)</option>
+                    <option value="New York Oceanic">New York Oceanic (KZNY)</option>
+                    <option value="Dakar">Dakar Oceanic (GOOO)</option>
+                    <option value="Recife">Recife Oceanic (SBRF)</option>
+                </optgroup>
+                <optgroup label="🌏 Тихий океан">
+                    <option value="Oakland">Oakland Oceanic (KZAK)</option>
+                    <option value="Tokyo Oceanic">Tokyo Oceanic (RJJJ)</option>
+                    <option value="Anchorage">Anchorage Oceanic (PAZA)</option>
+                    <option value="Nadi">Nadi Oceanic (NFFF)</option>
+                    <option value="Auckland">Auckland Oceanic (NZZO)</option>
+                </optgroup>
+                <optgroup label="🌊 Индийский океан">
+                    <option value="Mumbai Oceanic">Мумбаи Oceanic (VABF)</option>
+                    <option value="Chennai Oceanic">Ченнаи Oceanic (VOMF)</option>
+                    <option value="Mauritius">Маврикий Oceanic (FIMM)</option>
+                    <option value="Melbourne Oceanic">Мельбурн Oceanic (YMMM)</option>
+                    <option value="Perth">Перт Oceanic (YPRF)</option>
+                </optgroup>
+                <optgroup label="🧊 Северный Ледовитый">
+                    <option value="Bodo Oceanic">Бодо Oceanic (ENOB)</option>
+                    <option value="Murmansk Oceanic">Мурманск Oceanic (ULMM)</option>
+                    <option value="Anadyr Oceanic">Анадырь Oceanic (UHMA)</option>
+                </optgroup>
+                <optgroup label="🌊 Средиземное море">
+                    <option value="Barcelona">Барселона FIR (LECB)</option>
+                    <option value="Roma">Рим FIR (LIRR)</option>
+                    <option value="Athens">Афины FIR (LGGG)</option>
+                    <option value="Nicosia">Никосия FIR (LCCC)</option>
+                    <option value="Malta">Мальта FIR (LMMM)</option>
+                </optgroup>
+                <optgroup label="🌊 Чёрное море">
+                    <option value="Istanbul">Стамбул FIR (LTBB)</option>
+                    <option value="Ankara">Анкара FIR (LTAA)</option>
+                    <option value="Rostov">Ростов FIR (URRV)</option>
+                    <option value="Simferopol">Симферополь FIR (UKFV)</option>
+                    <option value="Odessa">Одесса FIR (UKOV)</option>
+                    <option value="Varna">Варна FIR (LBSR)</option>
+                    <option value="Bucharest">Бухарест FIR (LRBB)</option>
+                </optgroup>
+                <optgroup label="🌊 Каспийское море">
+                    <option value="Baku">Баку FIR (UBBA)</option>
+                    <option value="Astana">Астана FIR (UACC)</option>
+                    <option value="Tehran">Тегеран FIR (OIIX)</option>
+                </optgroup>
+                <optgroup label="🌊 Красное море">
+                    <option value="Cairo">Каир FIR (HECC)</option>
+                    <option value="Jeddah">Джидда FIR (OEJD)</option>
+                    <option value="Asmara">Асмэра FIR (HHAS)</option>
+                </optgroup>
+                <optgroup label="🌊 Северное море">
+                    <option value="Scottish">Шотландия FIR (EGPX)</option>
+                    <option value="Amsterdam">Амстердам FIR (EHAA)</option>
+                    <option value="Oslo">Осло FIR (ENOS)</option>
+                </optgroup>
+                <optgroup label="🌊 Балтийское море">
+                    <option value="Stockholm">Стокгольм FIR (ESAA)</option>
+                    <option value="Helsinki">Хельсинки FIR (EFIN)</option>
+                    <option value="Riga">Рига FIR (EVRR)</option>
+                    <option value="Kaliningrad">Калининград FIR (UMKK)</option>
+                </optgroup>
+                <optgroup label="🌊 Карибское море">
+                    <option value="Havana">Гавана FIR (MUHA)</option>
+                    <option value="Santo Domingo">Санто-Доминго FIR (MDCS)</option>
+                    <option value="Port of Spain">Порт-оф-Спейн FIR (TTZP)</option>
+                </optgroup>
+                <optgroup label="🌊 Южно-Китайское море">
+                    <option value="Hong Kong">Гонконг FIR (VHHK)</option>
+                    <option value="Manila">Манила FIR (RPHI)</option>
+                    <option value="Ho Chi Minh">Хошимин FIR (VVHM)</option>
+                    <option value="Singapore Oceanic">Сингапур Oceanic (WSJC)</option>
+                </optgroup>
+            </select>
+            <label>Цвет границ:</label>
+            <select id="fir-color">
+                <option value="red">Красный</option>
+                <option value="green">Зелёный</option>
+                <option value="blue" selected>Синий</option>
+                <option value="orange">Оранжевый</option>
+                <option value="purple">Фиолетовый</option>
+                <option value="yellow">Жёлтый</option>
+                <option value="cyan">Голубой</option>
+            </select>
+            <label>Прозрачность:</label>
+            <select id="fir-opacity">
+                <option value="0.05">5%</option>
+                <option value="0.1">10%</option>
+                <option value="0.2" selected>20%</option>
+                <option value="0.3">30%</option>
+                <option value="0.5">50%</option>
+            </select>
+            <br>
+            <button id="apply-fir">Показать зону</button>
+            <button id="cancel-fir">Отмена</button>
+        </div>
+    </div>
+
+    <!-- Route Modal -->
+    <div class="modal" id="route-modal">
+        <div class="modal-content">
+            <b>✈️ Маршрут по точкам</b><br><br>
+            <label>Введите точки маршрута (Waypoint):</label>
+            <textarea id="route-points" rows="6" placeholder="BRIGS SHERL HAPIE RIFLE ACK 52N050W 54N045W"></textarea>
+            <label>Цвет линии:</label>
+            <select id="route-color">
+                <option value="red" selected>Красный</option>
+                <option value="green">Зелёный</option>
+                <option value="blue">Синий</option>
+                <option value="orange">Оранжевый</option>
+                <option value="purple">Фиолетовый</option>
+                <option value="yellow">Жёлтый</option>
+                <option value="cyan">Голубой</option>
+                <option value="magenta">Пурпурный</option>
+            </select>
+            <br>
+            <button id="apply-route">Построить</button>
+            <button id="cancel-route">Отмена</button>
+        </div>
+    </div>
+
+    <!-- Zone Modal -->
+    <div class="modal" id="zone-modal">
+        <div class="modal-content">
+            <b>Настройка зоны</b><br><br>
+            <label>Радиус (км):</label>
+            <input type="number" id="zone-radius" min="0.1" step="0.1" value="10">
+            <label>Цвет круга:</label>
+            <select id="zone-color">
+                <option value="red">Красный</option>
+                <option value="green">Зелёный</option>
+                <option value="blue">Синий</option>
+                <option value="orange">Оранжевый</option>
+                <option value="purple">Фиолетовый</option>
+                <option value="yellow" selected>Жёлтый</option>
+            </select>
+            <br>
+            <button id="apply-zone">Применить</button>
+            <button id="cancel-zone">Отмена</button>
+        </div>
+    </div>
+
+    <!-- Line Modal -->
+    <div class="modal" id="line-modal">
+        <div class="modal-content">
+            <b>Настройка линии</b><br><br>
+            <label>Цвет линии:</label>
+            <select id="line-color">
+                <option value="red" selected>Красный</option>
+                <option value="green">Зелёный</option>
+                <option value="blue">Синий</option>
+                <option value="orange">Оранжевый</option>
+                <option value="purple">Фиолетовый</option>
+                <option value="yellow">Жёлтый</option>
+                <option value="black">Чёрный</option>
+                <option value="cyan">Голубой</option>
+                <option value="magenta">Пурпурный</option>
+            </select>
+            <label>Толщина линии:</label>
+            <input type="number" id="line-weight" min="1" max="10" value="3">
+            <br>
+            <button id="apply-line">Применить</button>
+            <button id="cancel-line">Отмена</button>
+        </div>
+    </div>
+
+    <!-- Map Modal -->
+    <div class="modal" id="map-modal">
+        <div class="modal-content">
+            <b>Выбор карты</b><br><br>
+            <button id="map-standard" style="width:100%; margin-bottom:10px; background:#607D8B; color:white;">🗺️ Стандартная</button>
+            <button id="map-dark" style="width:100%; margin-bottom:10px; background:#333; color:white;">🌙 Тёмная</button>
+            <button id="map-satellite" style="width:100%; margin-bottom:10px; background:#4CAF50; color:white;">🛰️ Спутник</button>
+            <button id="cancel-map" style="width:100%; background:#f44336; color:white;">Отмена</button>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+        // ==================== КАРТА ====================
+        const map = L.map('map', { attributionControl: false, zoomControl: true }).setView([30, 0], 2);
+        
+        const standardLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 });
+        const darkLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19, subdomains: 'abcd' });
+        const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19 });
+        standardLayer.addTo(map);
+
+        const routeLayer = L.layerGroup().addTo(map);
+        const liveLayer = L.layerGroup().addTo(map);
+        const customLayer = L.layerGroup().addTo(map);
+        const firLayer = L.layerGroup().addTo(map);
+        const airportLayer = L.layerGroup().addTo(map);
+        let currentMapLayer = standardLayer;
+        let airportsData = [];
+        let airportsVisible = false;
+        let isAirportsLoaded = false;
+        let totalAirports = 0;
+
+        // ==================== ЗАГРУЗКА ВСЕХ АЭРОПОРТОВ МИРА ====================
+        async function loadAllAirports() {
+            const overlay = document.getElementById('loading-overlay');
+            const text = document.getElementById('loading-text');
+            const progress = document.getElementById('loading-progress');
+            const btn = document.getElementById('btn-airports');
+            
+            overlay.classList.add('active');
+            btn.classList.add('loading');
+            text.textContent = 'Загрузка аэропортов мира...';
+            progress.textContent = 'Подготовка...';
+            
+            try {
+                // Проверяем кэш в localStorage
+                const cached = localStorage.getItem('airports_data_v2');
+                const cachedTime = localStorage.getItem('airports_data_time');
+                
+                if (cached && cachedTime) {
+                    const age = Date.now() - parseInt(cachedTime);
+                    // Кэш действителен 7 дней
+                    if (age < 7 * 24 * 60 * 60 * 1000) {
+                        try {
+                            const data = JSON.parse(cached);
+                            if (data && data.length > 1000) {
+                                airportsData = data;
+                                isAirportsLoaded = true;
+                                totalAirports = data.length;
+                                text.textContent = `✅ Загружено из кэша: ${totalAirports} аэропортов`;
+                                progress.textContent = 'Готово!';
+                                setTimeout(() => overlay.classList.remove('active'), 1000);
+                                btn.classList.remove('loading');
+                                updateStats();
+                                return;
+                            }
+                        } catch (e) {}
+                    }
+                }
+                
+                // Загружаем из интернета
+                text.textContent = 'Загрузка базы данных аэропортов...';
+                progress.textContent = 'Подключение к OurAirports...';
+                
+                const response = await fetch('https://davidmegginson.github.io/ourairports-data/airports.csv');
+                if (!response.ok) throw new Error('Ошибка загрузки');
+                
+                const textData = await response.text();
+                const lines = textData.split('\n');
+                const headers = lines[0].split(',');
+                
+                // Индексы колонок
+                const idIdx = headers.indexOf('id');
+                const identIdx = headers.indexOf('ident');
+                const typeIdx = headers.indexOf('type');
+                const nameIdx = headers.indexOf('name');
+                const latIdx = headers.indexOf('latitude_deg');
+                const lonIdx = headers.indexOf('longitude_deg');
+                const elevIdx = headers.indexOf('elevation_ft');
+                const continentIdx = headers.indexOf('continent');
+                const countryIdx = headers.indexOf('iso_country');
+                const municipalityIdx = headers.indexOf('municipality');
+                const iataIdx = headers.indexOf('iata_code');
+                const localCodeIdx = headers.indexOf('local_code');
+                
+                const airports = [];
+                let processed = 0;
+                const total = lines.length;
+                
+                text.textContent = 'Обработка данных аэропортов...';
+                
+                for (let i = 1; i < total; i++) {
+                    const line = lines[i];
+                    if (!line.trim()) continue;
+                    
+                    // Показываем прогресс каждые 1000 строк
+                    if (i % 1000 === 0) {
+                        progress.textContent = `Обработано: ${i} из ${total}`;
+                        await sleep(0); // Даём UI обновиться
+                    }
+                    
+                    const cols = line.split(',');
+                    if (cols.length <= Math.max(identIdx, latIdx, lonIdx)) continue;
+                    
+                    const lat = parseFloat(cols[latIdx]);
+                    const lon = parseFloat(cols[lonIdx]);
+                    if (isNaN(lat) || isNaN(lon)) continue;
+                    
+                    const type = cols[typeIdx] || '';
+                    // Исключаем закрытые и вертодромы
+                    if (type.includes('closed') || type.includes('heliport')) continue;
+                    
+                    const ident = cols[identIdx] || '';
+                    // Пропускаем если нет идентификатора
+                    if (!ident) continue;
+                    
+                    airports.push({
+                        id: cols[idIdx] || '',
+                        ident: ident,
+                        iata: cols[iataIdx] || '',
+                        localCode: cols[localCodeIdx] || '',
+                        type: type || 'unknown',
+                        name: cols[nameIdx] || ident,
+                        lat: lat,
+                        lon: lon,
+                        elevation: parseFloat(cols[elevIdx]) || 0,
+                        continent: cols[continentIdx] || '',
+                        country: cols[countryIdx] || '',
+                        municipality: cols[municipalityIdx] || ''
+                    });
+                    
+                    processed++;
+                }
+                
+                // Сохраняем в кэш
+                try {
+                    localStorage.setItem('airports_data_v2', JSON.stringify(airports));
+                    localStorage.setItem('airports_data_time', Date.now().toString());
+                } catch (e) {
+                    console.warn('Не удалось сохранить кэш:', e);
+                }
+                
+                airportsData = airports;
+                isAirportsLoaded = true;
+                totalAirports = airports.length;
+                
+                text.textContent = `✅ Загружено: ${totalAirports} аэропортов`;
+                progress.textContent = 'Готово!';
+                updateStats();
+                
+                setTimeout(() => overlay.classList.remove('active'), 1000);
+                btn.classList.remove('loading');
+                
+                console.log(`🛬 Загружено аэропортов: ${totalAirports}`);
+                
+            } catch (err) {
+                console.error('Ошибка загрузки:', err);
+                text.textContent = '❌ Ошибка загрузки';
+                progress.textContent = err.message;
+                btn.classList.remove('loading');
+                
+                // Пробуем использовать fallback данные
+                if (airportsData.length === 0) {
+                    airportsData = getFallbackAirports();
+                    totalAirports = airportsData.length;
+                    isAirportsLoaded = true;
+                    text.textContent = `⚠️ Использованы базовые аэропорты (${totalAirports})`;
+                    setTimeout(() => overlay.classList.remove('active'), 1500);
+                    updateStats();
+                }
+            }
+        }
+
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        // ==================== БАЗОВЫЕ АЭРОПОРТЫ (FALLBACK) ====================
+        function getFallbackAirports() {
+            const airports = [];
+            // 100+ крупнейших аэропортов мира
+            const data = [
+                ['ATL', 'Hartsfield-Jackson Atlanta', 33.6367, -84.4281, 'large_airport', 'US', 'Atlanta'],
+                ['PEK', 'Beijing Capital', 40.0799, 116.6031, 'large_airport', 'CN', 'Beijing'],
+                ['DXB', 'Dubai International', 25.2532, 55.3657, 'large_airport', 'AE', 'Dubai'],
+                ['LAX', 'Los Angeles International', 33.9416, -118.4085, 'large_airport', 'US', 'Los Angeles'],
+                ['LHR', 'London Heathrow', 51.4700, -0.4543, 'large_airport', 'GB', 'London'],
+                ['HND', 'Tokyo Haneda', 35.5494, 139.7798, 'large_airport', 'JP', 'Tokyo'],
+                ['CDG', 'Paris Charles de Gaulle', 49.0097, 2.5479, 'large_airport', 'FR', 'Paris'],
+                ['FRA', 'Frankfurt', 50.0379, 8.5622, 'large_airport', 'DE', 'Frankfurt'],
+                ['AMS', 'Amsterdam Schiphol', 52.3105, 4.7683, 'large_airport', 'NL', 'Amsterdam'],
+                ['SVO', 'Sheremetyevo', 55.9726, 37.4146, 'large_airport', 'RU', 'Moscow'],
+                ['DME', 'Domodedovo', 55.4086, 37.9063, 'large_airport', 'RU', 'Moscow'],
+                ['JFK', 'John F Kennedy', 40.6413, -73.7781, 'large_airport', 'US', 'New York'],
+                ['SFO', 'San Francisco', 37.6213, -122.3790, 'large_airport', 'US', 'San Francisco'],
+                ['ORD', 'O\'Hare', 41.9742, -87.9073, 'large_airport', 'US', 'Chicago'],
+                ['MIA', 'Miami', 25.7932, -80.2906, 'large_airport', 'US', 'Miami'],
+                ['SYD', 'Sydney Kingsford Smith', -33.9399, 151.1753, 'large_airport', 'AU', 'Sydney'],
+                ['SIN', 'Singapore Changi', 1.3644, 103.9915, 'large_airport', 'SG', 'Singapore'],
+                ['ICN', 'Incheon', 37.4602, 126.4407, 'large_airport', 'KR', 'Seoul'],
+                ['IST', 'Istanbul', 41.2753, 28.7519, 'large_airport', 'TR', 'Istanbul'],
+                ['LGW', 'London Gatwick', 51.1537, -0.1821, 'large_airport', 'GB', 'London'],
+                ['BCN', 'Barcelona', 41.2971, 2.0785, 'large_airport', 'ES', 'Barcelona'],
+                ['MAD', 'Madrid Barajas', 40.4983, -3.5676, 'large_airport', 'ES', 'Madrid'],
+                ['FCO', 'Rome Fiumicino', 41.8045, 12.2508, 'large_airport', 'IT', 'Rome'],
+                ['MUC', 'Munich', 48.3538, 11.7861, 'large_airport', 'DE', 'Munich'],
+                ['ZRH', 'Zurich', 47.4647, 8.5492, 'large_airport', 'CH', 'Zurich'],
+                ['VIE', 'Vienna', 48.1103, 16.5697, 'large_airport', 'AT', 'Vienna'],
+                ['CPH', 'Copenhagen', 55.6181, 12.6560, 'large_airport', 'DK', 'Copenhagen'],
+                ['OSL', 'Oslo Gardermoen', 60.2025, 11.0844, 'large_airport', 'NO', 'Oslo'],
+                ['ARN', 'Stockholm Arlanda', 59.6519, 17.9186, 'large_airport', 'SE', 'Stockholm'],
+                ['HEL', 'Helsinki Vantaa', 60.3180, 24.9638, 'large_airport', 'FI', 'Helsinki'],
+                ['ATH', 'Athens', 37.9364, 23.9445, 'large_airport', 'GR', 'Athens'],
+                ['LIS', 'Lisbon', 38.7742, -9.1342, 'large_airport', 'PT', 'Lisbon'],
+                ['DUB', 'Dublin', 53.4264, -6.2499, 'large_airport', 'IE', 'Dublin'],
+                ['KEF', 'Keflavik', 63.9850, -22.6056, 'large_airport', 'IS', 'Reykjavik'],
+                ['TLV', 'Ben Gurion', 32.0114, 34.8867, 'large_airport', 'IL', 'Tel Aviv'],
+                ['AUH', 'Abu Dhabi', 24.4331, 54.6511, 'large_airport', 'AE', 'Abu Dhabi'],
+                ['DOH', 'Hamad', 25.2731, 51.6081, 'large_airport', 'QA', 'Doha'],
+                ['BKK', 'Suvarnabhumi', 13.6811, 100.7473, 'large_airport', 'TH', 'Bangkok'],
+                ['KUL', 'Kuala Lumpur', 2.7456, 101.7099, 'large_airport', 'MY', 'Kuala Lumpur'],
+                ['CGK', 'Soekarno-Hatta', -6.1256, 106.6550, 'large_airport', 'ID', 'Jakarta'],
+                ['MNL', 'Ninoy Aquino', 14.5086, 121.0195, 'large_airport', 'PH', 'Manila'],
+                ['HKG', 'Hong Kong', 22.3089, 113.9146, 'large_airport', 'HK', 'Hong Kong'],
+                ['PVG', 'Shanghai Pudong', 31.1434, 121.8052, 'large_airport', 'CN', 'Shanghai'],
+                ['NRT', 'Narita', 35.7647, 140.3864, 'large_airport', 'JP', 'Tokyo'],
+                ['YVR', 'Vancouver', 49.1939, -123.1844, 'large_airport', 'CA', 'Vancouver'],
+                ['YYZ', 'Toronto Pearson', 43.6777, -79.6248, 'large_airport', 'CA', 'Toronto'],
+                ['MEX', 'Mexico City', 19.4363, -99.0721, 'large_airport', 'MX', 'Mexico City'],
+                ['GRU', 'Sao Paulo Guarulhos', -23.4356, -46.4731, 'large_airport', 'BR', 'Sao Paulo'],
+                ['GIG', 'Rio Galeao', -22.8089, -43.2436, 'large_airport', 'BR', 'Rio de Janeiro'],
+                ['EZE', 'Buenos Aires Ezeiza', -34.8222, -58.5358, 'large_airport', 'AR', 'Buenos Aires'],
+                ['SCL', 'Santiago', -33.3929, -70.7858, 'large_airport', 'CL', 'Santiago'],
+                ['JNB', 'Johannesburg', -26.1392, 28.2460, 'large_airport', 'ZA', 'Johannesburg'],
+                ['CAI', 'Cairo', 30.1219, 31.4056, 'large_airport', 'EG', 'Cairo'],
+                ['LED', 'Pulkovo', 59.8003, 30.2625, 'large_airport', 'RU', 'St Petersburg'],
+                ['KZN', 'Kazan', 55.6062, 49.2787, 'large_airport', 'RU', 'Kazan'],
+                ['SVX', 'Koltsovo', 56.7431, 60.8027, 'large_airport', 'RU', 'Yekaterinburg'],
+                ['KJA', 'Yemelyanovo', 56.1729, 92.4934, 'large_airport', 'RU', 'Krasnoyarsk'],
+                ['OVB', 'Tolmachevo', 55.0126, 82.6507, 'large_airport', 'RU', 'Novosibirsk'],
+                ['VVO', 'Knevichi', 43.3990, 132.1480, 'large_airport', 'RU', 'Vladivostok'],
+                ['KRR', 'Pashkovsky', 45.0348, 39.1705, 'large_airport', 'RU', 'Krasnodar'],
+                ['UFA', 'Ufa', 54.5575, 55.8744, 'large_airport', 'RU', 'Ufa'],
+                ['ROV', 'Rostov-on-Don', 47.2582, 39.8183, 'large_airport', 'RU', 'Rostov-on-Don'],
+                ['AER', 'Sochi', 43.4499, 39.9566, 'large_airport', 'RU', 'Sochi'],
+                ['MOW', 'Moscow Region', 55.7558, 37.6173, 'large_airport', 'RU', 'Moscow'],
+            ];
+            
+            for (const [ident, name, lat, lon, type, country, municipality] of data) {
+                airports.push({
+                    ident: ident,
+                    name: name,
+                    lat: lat,
+                    lon: lon,
+                    type: type || 'large_airport',
+                    country: country || '',
+                    municipality: municipality || '',
+                    iata: ident,
+                    elevation: 0
+                });
+            }
+            
+            return airports;
+        }
+
+        // ==================== ОТОБРАЖЕНИЕ АЭРОПОРТОВ ====================
+        function toggleAirports() {
+            if (airportsVisible) {
+                airportLayer.clearLayers();
+                airportsVisible = false;
+                document.getElementById('btn-airports').classList.remove('active');
+                document.getElementById('stats').classList.remove('active');
+                return;
+            }
+            
+            if (!isAirportsLoaded) {
+                loadAllAirports().then(() => renderAllAirports());
+            } else {
+                renderAllAirports();
+            }
+        }
+
+        function renderAllAirports() {
+            airportLayer.clearLayers();
+            
+            const colors = {
+                'large_airport': '#FF6B35',
+                'medium_airport': '#FFA726',
+                'small_airport': '#81C784',
+                'unknown': '#90A4AE'
+            };
+            
+            const sizes = {
+                'large_airport': 10,
+                'medium_airport': 7,
+                'small_airport': 5,
+                'unknown': 3
+            };
+            
+            const zoom = map.getZoom();
+            let count = 0;
+            const startTime = performance.now();
+            
+            // Определяем какие аэропорты показывать в зависимости от зума
+            const showLarge = true;
+            const showMedium = zoom >= 4;
+            const showSmall = zoom >= 7;
+            const showUnknown = zoom >= 9;
+            
+            for (const airport of airportsData) {
+                const type = airport.type || 'unknown';
+                
+                // Фильтруем по зуму
+                if (type === 'large_airport' && !showLarge) continue;
+                if (type === 'medium_airport' && !showMedium) continue;
+                if (type === 'small_airport' && !showSmall) continue;
+                if (type === 'unknown' && !showUnknown) continue;
+                
+                const color = colors[type] || '#90A4AE';
+                const size = sizes[type] || 4;
+                
+                const icon = L.divIcon({
+                    html: `<div style="
+                        background: ${color};
+                        width: ${size}px;
+                        height: ${size}px;
+                        border-radius: 50%;
+                        border: ${size > 5 ? '2px solid white' : '1px solid rgba(255,255,255,0.5)'};
+                        box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+                        cursor: pointer;
+                        transition: transform 0.2s;
+                    "></div>`,
+                    className: 'airport-marker',
+                    iconSize: [size + 4, size + 4],
+                    iconAnchor: [(size + 4) / 2, (size + 4) / 2]
+                });
+                
+                const marker = L.marker([airport.lat, airport.lon], { icon: icon }).addTo(airportLayer);
+                
+                // Попап
+                const typeLabels = {
+                    'large_airport': 'Крупный',
+                    'medium_airport': 'Средний',
+                    'small_airport': 'Малый',
+                    'unknown': 'Прочий'
+                };
+                const typeLabel = typeLabels[type] || 'Аэропорт';
+                const typeColors = {
+                    'large_airport': '#FF6B35',
+                    'medium_airport': '#FFA726',
+                    'small_airport': '#4CAF50',
+                    'unknown': '#90A4AE'
+                };
+                
+                const iata = airport.iata ? ` | ${airport.iata}` : '';
+                const elev = airport.elevation > 0 ? ` | ${Math.round(airport.elevation)} ft` : '';
+                const countryFlag = airport.country ? ` ${getFlagEmoji(airport.country)}` : '';
+                
+                marker.bindPopup(`
+                    <div class="airport-popup">
+                        <div class="name">${airport.name}</div>
+                        <div class="code">${airport.ident}${iata}${elev}</div>
+                        <div class="info">📍 ${airport.municipality || 'N/A'}${countryFlag}</div>
+                        <div class="info">
+                            <span class="type-badge" style="background:${typeColors[type]}">${typeLabel}</span>
+                            <span style="color:#999; margin-left:8px;">${airport.lat.toFixed(4)}°, ${airport.lon.toFixed(4)}°</span>
+                        </div>
+                    </div>
+                `);
+                
+                count++;
+                
+                // Ограничиваем количество для производительности
+                if (count > 5000 && zoom < 5) break;
+                if (count > 15000 && zoom < 7) break;
+                if (count > 30000 && zoom < 9) break;
+            }
+            
+            airportsVisible = true;
+            document.getElementById('btn-airports').classList.add('active');
+            updateStats();
+            
+            const endTime = performance.now();
+            console.log(`🛬 Показано ${count} аэропортов за ${(endTime - startTime).toFixed(0)}ms`);
+        }
+
+        function getFlagEmoji(countryCode) {
+            const code = countryCode.toUpperCase();
+            if (code.length !== 2) return '';
+            const offset = 127397;
+            const flag = String.fromCodePoint(...[...code].map(c => c.charCodeAt(0) + offset));
+            return flag;
+        }
+
+        function updateStats() {
+            const stats = document.getElementById('stats');
+            stats.textContent = `🛬 Загружено: ${airportsData.length} аэропортов`;
+            stats.classList.add('active');
+        }
+
+        // ==================== ПОИСК АЭРОПОРТОВ ====================
+        document.getElementById('btn-search').addEventListener('click', function() {
+            const box = document.getElementById('search-box');
+            box.classList.toggle('active');
+            if (box.classList.contains('active')) {
+                document.getElementById('search-input').focus();
+            }
+        });
+
+        document.getElementById('search-input').addEventListener('input', function() {
+            const query = this.value.trim().toUpperCase();
+            const resultsContainer = document.getElementById('search-results');
+            
+            if (query.length < 2) {
+                resultsContainer.classList.remove('active');
+                return;
+            }
+            
+            // Ищем в данных
+            const results = airportsData.filter(a => 
+                a.ident.toUpperCase().includes(query) ||
+                a.iata.toUpperCase().includes(query) ||
+                a.name.toUpperCase().includes(query) ||
+                (a.municipality && a.municipality.toUpperCase().includes(query)) ||
+                (a.country && a.country.toUpperCase().includes(query))
+            ).slice(0, 20);
+            
+            if (results.length === 0) {
+                resultsContainer.innerHTML = '<div style="padding:10px; color:#999; text-align:center;">Ничего не найдено</div>';
+                resultsContainer.classList.add('active');
+                return;
+            }
+            
+            resultsContainer.innerHTML = results.map(a => `
+                <div class="search-result-item" onclick="goToAirport('${a.ident}')">
+                    <div>
+                        <span class="code">${a.ident}</span>
+                        <span class="name">${a.name}</span>
+                    </div>
+                    <div>
+                        ${a.iata ? `<span style="color:#666; font-size:11px;">${a.iata}</span>` : ''}
+                        <span class="country">${a.country ? getFlagEmoji(a.country) : ''}</span>
+                    </div>
+                </div>
+            `).join('');
+            resultsContainer.classList.add('active');
+        });
+
+        function goToAirport(ident) {
+            const airport = airportsData.find(a => a.ident === ident);
+            if (airport) {
+                map.setView([airport.lat, airport.lon], 12);
+                // Показываем попап
+                const marker = L.marker([airport.lat, airport.lon]).addTo(airportLayer);
+                marker.bindPopup(`
+                    <div class="airport-popup">
+                        <div class="name">${airport.name}</div>
+                        <div class="code">${airport.ident} ${airport.iata ? '| ' + airport.iata : ''}</div>
+                        <div class="info">📍 ${airport.municipality || 'N/A'}, ${airport.country || ''}</div>
+                    </div>
+                `).openPopup();
+                
+                document.getElementById('search-box').classList.remove('active');
+                document.getElementById('search-results').classList.remove('active');
+                document.getElementById('search-input').value = '';
+            }
+        }
+
+        // ==================== FIR ДАННЫЕ ====================
+        const firData = {
+            'Shanwick': { name: 'Shanwick Oceanic FIR', coords: [[45,-20],[45,-40],[55,-40],[60,-30],[60,-10],[50,-10],[45,-20]], center: [52,-20] },
+            'Gander': { name: 'Gander Oceanic FIR', coords: [[40,-50],[40,-70],[55,-70],[55,-50],[50,-45],[45,-45],[40,-50]], center: [48,-55] },
+            'Santa Maria': { name: 'Santa Maria Oceanic FIR', coords: [[25,-15],[25,-40],[40,-40],[40,-15]], center: [32,-27] },
+            'New York Oceanic': { name: 'New York Oceanic FIR', coords: [[30,-65],[30,-80],[45,-80],[45,-65]], center: [37,-72] },
+            'Dakar': { name: 'Dakar Oceanic FIR', coords: [[0,-20],[0,-40],[20,-40],[20,-20]], center: [10,-30] },
+            'Recife': { name: 'Recife Oceanic FIR', coords: [[-10,-25],[-10,-40],[5,-40],[5,-25]], center: [-2,-32] },
+            'Oakland': { name: 'Oakland Oceanic FIR', coords: [[20,-130],[20,-150],[40,-150],[40,-130]], center: [30,-140] },
+            'Tokyo Oceanic': { name: 'Tokyo Oceanic FIR', coords: [[20,130],[20,150],[40,150],[40,130]], center: [30,140] },
+            'Anchorage': { name: 'Anchorage Oceanic FIR', coords: [[50,-160],[50,-130],[65,-130],[65,-160]], center: [57,-145] },
+            'Nadi': { name: 'Nadi Oceanic FIR', coords: [[-20,170],[-20,180],[0,180],[0,170]], center: [-10,175] },
+            'Auckland': { name: 'Auckland Oceanic FIR', coords: [[-30,160],[-30,180],[-50,180],[-50,160]], center: [-40,170] },
+            'Mumbai Oceanic': { name: 'Мумбаи Oceanic FIR', coords: [[5,60],[5,80],[20,80],[20,60]], center: [12,70] },
+            'Chennai Oceanic': { name: 'Ченнаи Oceanic FIR', coords: [[5,80],[5,95],[15,95],[15,80]], center: [10,87] },
+            'Mauritius': { name: 'Маврикий Oceanic FIR', coords: [[-25,50],[-25,70],[-5,70],[-5,50]], center: [-15,60] },
+            'Melbourne Oceanic': { name: 'Мельбурн Oceanic FIR', coords: [[-40,90],[-40,120],[-10,120],[-10,90]], center: [-25,105] },
+            'Perth': { name: 'Перт Oceanic FIR', coords: [[-35,100],[-35,120],[-15,120],[-15,100]], center: [-25,110] },
+            'Bodo Oceanic': { name: 'Бодо Oceanic FIR', coords: [[65,0],[65,25],[75,25],[75,0]], center: [70,12] },
+            'Murmansk Oceanic': { name: 'Мурманск Oceanic FIR', coords: [[65,25],[65,60],[75,60],[75,25]], center: [70,42] },
+            'Anadyr Oceanic': { name: 'Анадырь Oceanic FIR', coords: [[60,160],[60,180],[70,180],[70,160]], center: [65,170] },
+            'Barcelona': { name: 'Барселона FIR', coords: [[35,0],[35,5],[42,5],[42,0]], center: [38,2] },
+            'Roma': { name: 'Рим FIR', coords: [[35,10],[35,18],[45,18],[45,10]], center: [40,14] },
+            'Athens': { name: 'Афины FIR', coords: [[35,18],[35,28],[42,28],[42,18]], center: [38,23] },
+            'Nicosia': { name: 'Никосия FIR', coords: [[34,30],[34,35],[38,35],[38,30]], center: [36,32] },
+            'Malta': { name: 'Мальта FIR', coords: [[35,12],[35,16],[38,16],[38,12]], center: [36,14] },
+            'Istanbul': { name: 'Стамбул FIR', coords: [[40,26],[40,30],[43,30],[43,26]], center: [41,28] },
+            'Ankara': { name: 'Анкара FIR', coords: [[38,30],[38,38],[42,38],[42,30]], center: [40,34] },
+            'Rostov': { name: 'Ростов FIR', coords: [[45,35],[45,50],[50,50],[50,35]], center: [47,42] },
+            'Simferopol': { name: 'Симферополь FIR', coords: [[44,32],[44,37],[47,37],[47,32]], center: [45,34] },
+            'Odessa': { name: 'Одесса FIR', coords: [[45,28],[45,32],[48,32],[48,28]], center: [46,30] },
+            'Varna': { name: 'Варна FIR', coords: [[42,27],[42,30],[44,30],[44,27]], center: [43,28] },
+            'Bucharest': { name: 'Бухарест FIR', coords: [[44,25],[44,30],[48,30],[48,25]], center: [46,27] },
+            'Baku': { name: 'Баку FIR', coords: [[38,48],[38,52],[42,52],[42,48]], center: [40,50] },
+            'Astana': { name: 'Астана FIR', coords: [[45,50],[45,55],[50,55],[50,50]], center: [47,52] },
+            'Tehran': { name: 'Тегеран FIR', coords: [[35,48],[35,55],[40,55],[40,48]], center: [37,51] },
+            'Cairo': { name: 'Каир FIR', coords: [[25,32],[25,38],[30,38],[30,32]], center: [27,35] },
+            'Jeddah': { name: 'Джидда FIR', coords: [[15,35],[15,42],[25,42],[25,35]], center: [20,38] },
+            'Asmara': { name: 'Асмэра FIR', coords: [[12,38],[12,44],[18,44],[18,38]], center: [15,41] },
+            'Scottish': { name: 'Шотландия FIR', coords: [[55,-5],[55,2],[60,2],[60,-5]], center: [57,-1] },
+            'Amsterdam': { name: 'Амстердам FIR', coords: [[52,2],[52,8],[55,8],[55,2]], center: [53,5] },
+            'Oslo': { name: 'Осло FIR', coords: [[58,5],[58,15],[62,15],[62,5]], center: [60,10] },
+            'Stockholm': { name: 'Стокгольм FIR', coords: [[55,15],[55,25],[62,25],[62,15]], center: [58,20] },
+            'Helsinki': { name: 'Хельсинки FIR', coords: [[60,20],[60,30],[65,30],[65,20]], center: [62,25] },
+            'Riga': { name: 'Рига FIR', coords: [[55,20],[55,28],[58,28],[58,20]], center: [56,24] },
+            'Kaliningrad': { name: 'Калининград FIR', coords: [[54,19],[54,23],[56,23],[56,19]], center: [55,21] },
+            'Havana': { name: 'Гавана FIR', coords: [[20,-85],[20,-75],[25,-75],[25,-85]], center: [22,-80] },
+            'Santo Domingo': { name: 'Санто-Доминго FIR', coords: [[15,-72],[15,-65],[20,-65],[20,-72]], center: [17,-68] },
+            'Port of Spain': { name: 'Порт-оф-Спейн FIR', coords: [[8,-62],[8,-57],[12,-57],[12,-62]], center: [10,-59] },
+            'Hong Kong': { name: 'Гонконг FIR', coords: [[20,110],[20,118],[25,118],[25,110]], center: [22,114] },
+            'Manila': { name: 'Манила FIR', coords: [[12,118],[12,128],[20,128],[20,118]], center: [16,123] },
+            'Ho Chi Minh': { name: 'Хошимин FIR', coords: [[8,105],[8,115],[15,115],[15,105]], center: [11,110] },
+            'Singapore Oceanic': { name: 'Сингапур Oceanic FIR', coords: [[0,100],[0,110],[8,110],[8,100]], center: [4,105] }
+        };
+
+        // ==================== КНОПКИ ====================
+        document.getElementById('btn-airports').addEventListener('click', toggleAirports);
+        
+        document.getElementById('btn-fir').addEventListener('click', function() {
+            document.getElementById('fir-modal').style.display = 'flex';
+        });
+        
+        document.getElementById('apply-fir').addEventListener('click', function() {
+            const firName = document.getElementById('fir-select').value;
+            const color = document.getElementById('fir-color').value;
+            const opacity = parseFloat(document.getElementById('fir-opacity').value);
+            
+            if (!firName || !firData[firName]) {
+                alert('❌ Выберите FIR/UIR зону');
+                return;
+            }
+            
+            const fir = firData[firName];
+            const polygon = L.polygon(fir.coords, {
+                color: color,
+                weight: 2,
+                fillColor: color,
+                fillOpacity: opacity
+            }).addTo(firLayer);
+            
+            L.marker(fir.center, {
+                icon: L.divIcon({
+                    html: `<div class="fir-label" style="color:${color};">${fir.name}</div>`,
+                    className: '',
+                    iconSize: [150, 20]
+                })
+            }).addTo(firLayer);
+            
+            map.fitBounds(polygon.getBounds(), { padding: [50, 50] });
+            document.getElementById('fir-modal').style.display = 'none';
+        });
+        
+        document.getElementById('cancel-fir').addEventListener('click', function() {
+            document.getElementById('fir-modal').style.display = 'none';
+        });
+
+        // ==================== КАРТЫ ====================
+        document.getElementById('btn-map').addEventListener('click', function() {
+            document.getElementById('map-modal').style.display = 'flex';
+        });
+        
+        ['map-standard', 'map-dark', 'map-satellite'].forEach(id => {
+            document.getElementById(id).addEventListener('click', function() {
+                const layers = { 
+                    'map-standard': standardLayer, 
+                    'map-dark': darkLayer, 
+                    'map-satellite': satelliteLayer 
+                };
+                map.removeLayer(currentMapLayer);
+                layers[id].addTo(map);
+                currentMapLayer = layers[id];
+                document.getElementById('map-modal').style.display = 'none';
+            });
+        });
+        
+        document.getElementById('cancel-map').addEventListener('click', function() {
+            document.getElementById('map-modal').style.display = 'none';
+        });
+
+        // ==================== МАРШРУТ ====================
+        document.getElementById('btn-route').addEventListener('click', function() {
+            document.getElementById('route-modal').style.display = 'flex';
+        });
+        
+        document.getElementById('apply-route').addEventListener('click', function() {
+            const pointsText = document.getElementById('route-points').value.trim();
+            const color = document.getElementById('route-color').value;
+            
+            if (!pointsText) {
+                alert('❌ Введите точки маршрута');
+                return;
+            }
+            
+            const tokens = pointsText.split(/\s+/).filter(w => w.length > 0);
+            const coordinates = [];
+            
+            for (const token of tokens) {
+                const coord = parseCoordinate(token);
+                if (coord) {
+                    coordinates.push(coord);
+                    continue;
+                }
+                if (token === 'DCT') continue;
+            }
+            
+            if (coordinates.length < 2) {
+                alert('❌ Недостаточно точек для маршрута');
+                return;
+            }
+            
+            const line = L.polyline(coordinates, {
+                color: color,
+                weight: 3,
+                opacity: 0.8
+            }).addTo(routeLayer);
+            
+            coordinates.forEach((coord, index) => {
+                L.circleMarker(coord, {
+                    radius: 5,
+                    color: color,
+                    fillColor: color,
+                    fillOpacity: 0.8
+                }).addTo(routeLayer).bindPopup(`Точка ${index + 1}<br>${coord[0].toFixed(4)}°, ${coord[1].toFixed(4)}°`);
+            });
+            
+            const bounds = L.latLngBounds(coordinates);
+            map.fitBounds(bounds, { padding: [50, 50] });
+            document.getElementById('route-modal').style.display = 'none';
+        });
+        
+        document.getElementById('cancel-route').addEventListener('click', function() {
+            document.getElementById('route-modal').style.display = 'none';
+        });
+
+        function parseCoordinate(coordStr) {
+            coordStr = coordStr.trim().toUpperCase();
+            const pattern1 = /^(\d{1,2})([NS])(\d{1,3})([EW])$/;
+            const pattern2 = /^(\d{1,2})([NS])(\d{1,3})$/;
+            
+            let match = coordStr.match(pattern1);
+            if (match) {
+                let lat = parseInt(match[1]);
+                let lon = parseInt(match[3]);
+                if (match[2] === 'S') lat = -lat;
+                if (match[4] === 'W') lon = -lon;
+                return [lat, lon];
+            }
+            
+            match = coordStr.match(pattern2);
+            if (match) {
+                let lat = parseInt(match[1]);
+                let lon = parseInt(match[3]);
+                if (match[2] === 'S') lat = -lat;
+                lon = -lon;
+                return [lat, lon];
+            }
+            
+            return null;
+        }
+
+        // ==================== CSV ====================
+        document.getElementById('btn-load').addEventListener('click', function() {
+            document.getElementById('file-input').click();
+        });
+
+        document.getElementById('file-input').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(ev) {
+                try {
+                    const lines = ev.target.result.split('\n');
+                    const headers = lines[0].split(',');
+                    const idx = headers.indexOf('Position');
+                    if (idx === -1) throw new Error('Нет колонки Position');
+                    
+                    const points = [];
+                    for (let i = 1; i < lines.length; i++) {
+                        const cols = lines[i].split(',');
+                        if (cols.length <= idx) continue;
+                        const [lat, lon] = cols[idx].split(',').map(s => parseFloat(s.trim()));
+                        if (!isNaN(lat) && !isNaN(lon)) {
+                            points.push([lat, lon]);
+                        }
+                    }
+                    
+                    if (points.length < 2) throw new Error('Недостаточно точек');
+                    
+                    const line = L.polyline(points, { color: 'red', weight: 3 }).addTo(routeLayer);
+                    const bounds = L.latLngBounds(points);
+                    map.fitBounds(bounds, { padding: [50, 50] });
+                    
+                } catch (err) {
+                    alert('Ошибка: ' + err.message);
+                }
+            };
+            reader.readAsText(file);
+            e.target.value = '';
+        });
+
+        // ==================== LIVE ====================
+        let liveInterval = null;
+        document.getElementById('btn-live').addEventListener('click', function() {
+            if (liveInterval) {
+                clearInterval(liveInterval);
+                liveInterval = null;
+                liveLayer.clearLayers();
+                this.classList.remove('active');
+                return;
+            }
+            
+            this.classList.add('active');
+            fetchLiveData();
+            liveInterval = setInterval(fetchLiveData, 15000);
+        });
+
+        async function fetchLiveData() {
+            try {
+                const response = await fetch('https://opensky-network.org/api/states/all');
+                if (!response.ok) throw new Error('Ошибка');
+                const data = await response.json();
+                if (data.states) {
+                    liveLayer.clearLayers();
+                    data.states.forEach(state => {
+                        if (state[5] && state[6]) {
+                            const lon = state[5], lat = state[6], alt = state[7] || 0;
+                            const color = alt > 10000 ? 'darkred' : alt > 5000 ? 'orange' : 'green';
+                            L.circleMarker([lat, lon], {
+                                radius: 5,
+                                color: color,
+                                fillColor: color,
+                                fillOpacity: 0.8
+                            }).bindPopup(`<b>${state[1] || 'N/A'}</b><br>Высота: ${alt} м`).addTo(liveLayer);
+                        }
+                    });
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        // ==================== МАРКЕР НА КАРТЕ ====================
+        let currentPlane = null;
+        let currentCircle = null;
+
+        map.on('click', function(e) {
+            if (currentPlane) customLayer.removeLayer(currentPlane);
+            if (currentCircle) customLayer.removeLayer(currentCircle);
+
+            const planeIcon = L.divIcon({
+                html: '<div style="font-size:32px; color:yellow; text-shadow:2px 2px 4px black;">✈</div>',
+                className: 'plane-icon',
+                iconSize: [32, 32],
+                iconAnchor: [16, 16]
+            });
+            currentPlane = L.marker(e.latlng, { icon: planeIcon }).addTo(customLayer);
+
+            currentCircle = L.circle(e.latlng, {
+                radius: 10000,
+                color: 'yellow',
+                fillColor: 'yellow',
+                fillOpacity: 0.3
+            }).addTo(customLayer);
+
+            document.getElementById('zone-modal').style.display = 'flex';
+        });
+
+        document.getElementById('apply-zone').addEventListener('click', function() {
+            const radius = parseFloat(document.getElementById('zone-radius').value) * 1000;
+            const color = document.getElementById('zone-color').value;
+            if (currentCircle) {
+                currentCircle.setRadius(radius);
+                currentCircle.setStyle({ color: color, fillColor: color });
+            }
+            document.getElementById('zone-modal').style.display = 'none';
+        });
+
+        document.getElementById('cancel-zone').addEventListener('click', function() {
+            if (currentPlane) customLayer.removeLayer(currentPlane);
+            if (currentCircle) customLayer.removeLayer(currentCircle);
+            currentPlane = null;
+            currentCircle = null;
+            document.getElementById('zone-modal').style.display = 'none';
+        });
+
+        // ==================== ОЧИСТКА ====================
+        document.getElementById('btn-clear').addEventListener('click', function() {
+            routeLayer.clearLayers();
+            liveLayer.clearLayers();
+            customLayer.clearLayers();
+            firLayer.clearLayers();
+            airportLayer.clearLayers();
+            currentPlane = null;
+            currentCircle = null;
+            airportsVisible = false;
+            document.getElementById('btn-airports').classList.remove('active');
+            document.getElementById('stats').classList.remove('active');
+            if (liveInterval) {
+                clearInterval(liveInterval);
+                liveInterval = null;
+                document.getElementById('btn-live').classList.remove('active');
+            }
+        });
+
+        // ==================== ИНФО ====================
+        document.getElementById('btn-about').addEventListener('click', function() {
+            alert('✈️ Flight Tracker - Все аэропорты мира\n\n' +
+                  '🌍 — Показать все аэропорты (50,000+)\n' +
+                  '🔍 — Поиск аэропорта\n' +
+                  '📂 — Загрузить CSV\n' +
+                  '✈️ — Маршрут по точкам\n' +
+                  '🗺️ — Полётные зоны FIR/UIR\n' +
+                  '🛩️ — Live-режим (OpenSky)\n' +
+                  '🎮 — MSFS2020 (опционально)\n' +
+                  '🌍 — Сменить карту\n' +
+                  '🗑️ — Очистить\n\n' +
+                  'Данные: OurAirports (50,000+ аэропортов)\n' +
+                  'Кэширование: localStorage (7 дней)');
+        });
+
+        document.getElementById('btn-msfs').addEventListener('click', function() {
+            alert('🎮 MSFS2020\n\nДля подключения:\n1. Запустите MSFS2020\n2. Включите Developer Mode\n3. Включите WebSocket сервер\n4. Введите IP и порт');
+        });
+
+        // ==================== ОБНОВЛЕНИЕ ПРИ ЗУМЕ ====================
+        map.on('zoomend', function() {
+            if (airportsVisible && isAirportsLoaded) {
+                renderAllAirports();
+            }
+        });
+
+        // ==================== ЗАГРУЗКА ПРИ СТАРТЕ ====================
+        // Загружаем в фоне
+        setTimeout(() => {
+            loadAllAirports();
+        }, 500);
+
+        console.log('✅ Flight Tracker загружен!');
+        console.log('🛬 Загрузка 50,000+ аэропортов мира...');
+    </script>
+</body>
+</html>
